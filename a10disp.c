@@ -72,6 +72,8 @@ Change DISP_TV_MODE_NUM in include/video/sunxi_disp_ioctl.h, add mode to this fi
 #define COMMAND_DISABLE_SCALER 			10
 #define COMMAND_ENABLE_HDMI 			11
 #define COMMAND_ENABLE_HDMI_FORCE 		12
+#define COMMAND_SET_LAYER_ARG 			13
+
 static int fd_disp;
 static int fd_fb[2];
 static int nu_framebuffer_buffers = DEFAULT_NUMBER_OF_FRAMEBUFFER_BUFFERS;
@@ -177,7 +179,15 @@ static void usage(int argc, char *argv[]) {
 		"	Enable hardware scaler layer. Can be used with overscaned HDMI or non-square pixel lcd matrix.\n"
 		"	May cause VDPAU problems if the resolution dimensions are not divisible by 16.\n"
 		"disablescaler\n"
-		"	Disable hardware scaler layer.\n",
+		"	Disable hardware scaler layer.\n"
+		"layerbrightness <value>\n"
+		"	Set layer brightness. Need reenable scaler to update value.\n"
+		"layercontrast <value>\n"
+		"	Set layer contrast.\n"
+		"layersaturation <value>\n"
+		"	Set layer saturetion.\n"
+		"layerhue <value>\n"
+		"	Set layer hue.\n",
 		argv[0]);
 	printf("\nHDMI/TV mode numbers:\n");
 	for (i = 0; i < MODE_COUNT; i++)
@@ -577,6 +587,8 @@ int main(int argc, char *argv[]) {
 	int previous_width = 800, previous_height = 480;
 	int screen = 0;
 	int sc_source_width, sc_source_height, sc_width, sc_height; //Scaler args
+	int layer_arg_value; //Variable to speify brightness, hue or saturation value
+	__disp_cmd_t layer_arg;
 	int argi = 1;
 	if (argc == 1) {
 		usage(argc, argv);
@@ -806,6 +818,50 @@ int main(int argc, char *argv[]) {
 	else
 		if(strcasecmp(argv[argi], "disablescaler") == 0)
 			command=COMMAND_DISABLE_SCALER;
+	else
+	if (strcasecmp(argv[argi], "layerbrightness") == 0) {
+		if (argi + 1 >= argc) {
+			usage(argc, argv);
+			return 1;
+		}
+		argi++;
+		command = COMMAND_SET_LAYER_ARG;
+		layer_arg=DISP_CMD_LAYER_SET_BRIGHT;
+		layer_arg_value=atoi(argv[argi]);
+	}
+	else
+	if (strcasecmp(argv[argi], "layercontrast") == 0) {
+		if (argi + 1 >= argc) {
+			usage(argc, argv);
+			return 1;
+		}
+		argi++;
+		command = COMMAND_SET_LAYER_ARG;
+		layer_arg=DISP_CMD_LAYER_SET_CONTRAST;
+		layer_arg_value=atoi(argv[argi]);
+	}
+	else
+	if (strcasecmp(argv[argi], "layersaturation") == 0) {
+		if (argi + 1 >= argc) {
+			usage(argc, argv);
+			return 1;
+		}
+		argi++;
+		command = COMMAND_SET_LAYER_ARG;
+		layer_arg=DISP_CMD_LAYER_SET_SATURATION;
+		layer_arg_value=atoi(argv[argi]);
+	}
+	else
+	if (strcasecmp(argv[argi], "layerhue") == 0) {
+		if (argi + 1 >= argc) {
+			usage(argc, argv);
+			return 1;
+		}
+		argi++;
+		command = COMMAND_SET_LAYER_ARG;
+		layer_arg=DISP_CMD_LAYER_SET_HUE;
+		layer_arg_value=atoi(argv[argi]);
+	}
 	else {
 		fprintf(stderr, "Unknown command %s. Run a10disp without arguments for usage information.\n", argv[argi]);
 		return 1;
@@ -1215,6 +1271,17 @@ int main(int argc, char *argv[]) {
 			set_framebuffer_console_size_to_screen_size_and_set_pixel_depth(screen, 4);
 		else
 			set_framebuffer_console_size_to_screen_size(screen);
+	}
+	else
+	if(command == COMMAND_SET_LAYER_ARG)
+	{
+		ioctl(fd_disp, DISP_CMD_LAYER_ENHANCE_OFF, args);
+		args[0]=screen;
+		args[1]=get_layer_handle(screen);
+		args[2]=layer_arg_value;
+		args[4]=0;
+		ioctl(fd_disp, layer_arg, args);
+		ioctl(fd_disp, DISP_CMD_LAYER_ENHANCE_ON, args);
 	}
 
 	if (command == COMMAND_SWITCH_TO_HDMI || command == COMMAND_SWITCH_TO_HDMI_FORCE ||
