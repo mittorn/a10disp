@@ -147,9 +147,9 @@ static void usage(int argc, char *argv[]) {
 		"	Set fbset command path.\n"
 		"--skip-size-check\n"
 		"	Do not check framebuffer size.\n"
-                "--no-version-check\n"
-                "       Skip the version check for the kernel fb driver, allowing running of the\n"
-		"       program on old kernels and Android.\n"
+		"--no-version-check\n"
+		"	Skip the version check for the kernel fb driver, allowing running of the\n"
+		"	program on old kernels and Android.\n"
 		"Commands:\n"
 		"info\n"
 		"	Show information about the current mode on screens 0 and 1.\n"
@@ -1223,7 +1223,9 @@ int main(int argc, char *argv[]) {
 	command == COMMAND_CHANGE_PIXEL_DEPTH) {
 		if (bytes_per_pixel == 0)
 			bytes_per_pixel = previous_bytes_per_pixel;
-		printf("Mode has been changed to %s, %d bpp.\n", mode_str[mode], bytes_per_pixel * 8);
+		char * modestr;
+		if(mode==DISP_TV_MODE_EDID)modestr="EDID";else modestr=mode_str[mode];
+		printf("Mode has been changed to %s (%d), %d bpp.\n", modestr, mode, bytes_per_pixel * 8);
 	}
 
 	return 0;
