@@ -587,7 +587,7 @@ int main(int argc, char *argv[]) {
 	int previous_width = 800, previous_height = 480;
 	int screen = 0;
 	int sc_source_width, sc_source_height, sc_width, sc_height; //Scaler args
-	int layer_arg_value; //Variable to speify brightness, hue or saturation value
+	int layer_arg_value; //Variable to specqify brightness, hue or saturation value
 	__disp_cmd_t layer_arg;
 	int argi = 1;
 	if (argc == 1) {
@@ -638,6 +638,7 @@ int main(int argc, char *argv[]) {
 		if (strcasecmp(argv[argi], "--skip-version-check") == 0) {
 			skip_version_check = 1;
 			argi++;
+			continue;
 		}
 		break;
 	}
@@ -896,7 +897,7 @@ int main(int argc, char *argv[]) {
 		printf("This program works best with sunxi display driver 1.0 or higher.\n"
 			"Upgrade your kernel if possible.\nSome commands will not work.\n");
 		if (!skip_version_check) {
-			printf("Add the --no-version-check option to allow use of program with\n" 
+			printf("Add the --skip-version-check option to allow use of program with\n" 
 				"the currently installed kernel version with old fb driver.\n");
 			exit(1);
 		}
@@ -964,15 +965,6 @@ int main(int argc, char *argv[]) {
 					continue;
 
 				layer_handle = get_layer_handle(screen);
-				if (screen == 0)
-					ret = ioctl(fd_fb[0], FBIOGET_LAYER_HDL_0, args);
-				else
-					ret = ioctl(fd_fb[1], FBIOGET_LAYER_HDL_1, args);
-				if (ret < 0) {
-					fprintf(stderr, "Error: ioctl(FBIOGET_LAYER_HDL_%d) failed: %s\n", screen, strerror(- ret));
-					return ret;
-				}
-				layer_handle = args[0];
 				args[0] = screen;
 				args[1] = layer_handle;
 				args[2] = &fb_info;
