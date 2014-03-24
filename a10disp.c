@@ -73,6 +73,7 @@ Change DISP_TV_MODE_NUM in include/video/sunxi_disp_ioctl.h, add mode to this fi
 #define COMMAND_ENABLE_HDMI 			11
 #define COMMAND_ENABLE_HDMI_FORCE 		12
 #define COMMAND_SET_LAYER_ARG 			13
+#define COMMAND_SET_PIXEL_FORMAT		14
 
 static int fd_disp;
 static int fd_fb[2];
@@ -113,6 +114,62 @@ static const char *mode_str[MODE_COUNT] = {
 	"1360x768 60 Hz",
 	"1280x1024 60 Hz",
 	"1680x1050 60 Hz"
+};
+
+static const char *format_str[21] = {
+	"1BPP",
+	"2BPP",
+	"4BPP",
+	"8BPP",
+	"RGB655",
+	"RGB565",
+	"RGB556",
+	"ARGB1555",
+	"RGBA5551",
+	"ARGB888",
+	"ARGB8888",
+	"RGB888",
+	"ARGB4444",
+	"",
+	"",
+	"",
+	"YUV444",
+	"YUV422",
+	"YUV420",
+	"YUV411",
+	"CSIRGB"
+};
+
+static const char *seq_str[29] = {
+	"ARGB",
+	"",
+	"BGRA",
+	"UYVY",
+	"YUYV",
+	"VYUY",
+	"YVYU",
+	"AYUV",
+	"VUYA",
+	"UVUV",
+	"VUVU",
+	"",
+	"",
+	"P10",
+	"P01",
+	"P3210",
+	"P0123",
+	"P76543210",
+	"P67452301",
+	"P10325476",
+	"P01234567",
+	"2BPP_BIG_BIG",
+	"2BPP_BIG_LITTER",
+	"2BPP_LITTER_BIG",
+	"2BPP_LITTER_LITTER",
+	"1BPP_BIG_BIG",
+	"1BPP_BIG_LITTER",
+	"1BPP_LITTER_BIG",
+	"1BPP_LITTER_LITTER"
 };
 
 static int mode_size[MODE_COUNT] = {
@@ -187,7 +244,11 @@ static void usage(int argc, char *argv[]) {
 		"layersaturation <value>\n"
 		"	Set layer saturetion.\n"
 		"layerhue <value>\n"
-		"	Set layer hue.\n",
+		"	Set layer hue.\n"
+		"setpixelformat [f<format>]s<seq>][w<brswap>]\n"
+		"	Set pixel format using DISP. Can work with lcd and hdmi. Useful when hdmi monitor uses wrong format.\n"
+		"	Example: f10s0w0 is ARGB8888 (f10), ARGB sequence (s0) without blue/red swapping (w0).\n"
+		"	Use setpixelformat without arguments for formats list",
 		argv[0]);
 	printf("\nHDMI/TV mode numbers:\n");
 	for (i = 0; i < MODE_COUNT; i++)
@@ -195,6 +256,18 @@ static void usage(int argc, char *argv[]) {
 			printf("%2d      %s\n", i, mode_str[i]);
 }
 
+static void pixfmt_usage()
+{
+	int i;
+	printf("\nPixel format numbers:\n");
+	for (i = 0; i < 21; i++)
+		if (strlen(format_str[i]) > 0)
+			printf("%2d      %s\n", i, format_str[i]);
+	printf("\nPixel sequence numbers:\n");
+	for (i = 0; i < 29; i++)
+		if (strlen(seq_str[i]) > 0)
+			printf("%2d      %s\n", i, seq_str[i]);
+}
 
 static char *output_type_str(__disp_output_type_t type) {
 	switch (type) {
@@ -297,10 +370,9 @@ static void set_framebuffer_console_size_to_screen_size_and_set_pixel_depth(int 
 	int tmp;
 	int ret;
 	int width, height;
-        const char *fbset_rgb_str = get_rgb_str(bytes_per_pixel);
 	char *fbset_str;
 	tmp = screen;
-       	ret = ioctl(fd_disp, DISP_CMD_SCN_GET_WIDTH, &tmp);
+	ret = ioctl(fd_disp, DISP_CMD_SCN_GET_WIDTH, &tmp);
 	if (ret < 0) {
 		fprintf(stderr, "Error: ioctl(SCN_GET_WIDTH) failed: %s\n",
 			strerror(-ret));
@@ -310,8 +382,8 @@ static void set_framebuffer_console_size_to_screen_size_and_set_pixel_depth(int 
 	tmp = screen;
 	ret = ioctl(fd_disp, DISP_CMD_SCN_GET_HEIGHT, &tmp);
 	if (ret < 0) {
-       		fprintf(stderr, "Error: ioctl(SCN_GET_HEIGHT) failed: %s\n",
-	       		strerror(-ret));
+		fprintf(stderr, "Error: ioctl(SCN_GET_HEIGHT) failed: %s\n",
+			strerror(-ret));
 		exit(ret);
 	}
 	height = ret;
@@ -319,15 +391,15 @@ static void set_framebuffer_console_size_to_screen_size_and_set_pixel_depth(int 
 		printf("Error: ioctl to get screen dimensions returned invalid value.\n");
 		exit(1);
 	}
-	asprintf(&fbset_str, "%s --all -fb %s%d -xres %d -yres %d -depth 32 -rgba 8,8,8,8",
-		fbset_path, fb_base, screen, width, height);
+	asprintf(&fbset_str, "%s --all -fb %s%d -xres %d -yres %d -depth %d -rgba %s",
+		fbset_path, fb_base, screen, width, height, bytes_per_pixel * 8, get_rgb_str(bytes_per_pixel));
 	printf("Setting console framebuffer resolution to %d x %d and pixel depth to %dbpp.\n", width, height, bytes_per_pixel * 8);
 	system(fbset_str);
 	free(fbset_str);
 }
 
 static void set_framebuffer_console_size_and_depth(int screen, int mode, int bytes_per_pixel) {
-        const char *fbset_rgb_str = get_rgb_str(bytes_per_pixel);
+	const char *fbset_rgb_str = get_rgb_str(bytes_per_pixel);
 	char *fbset_str;
 	asprintf(&fbset_str, "%s --all -fb %s%d -xres %d -yres %d -depth 32 -rgba 8,8,8,8",
 		fbset_path, fb_base, screen, mode_width[mode], mode_height[mode]);
@@ -338,11 +410,11 @@ static void set_framebuffer_console_size_and_depth(int screen, int mode, int byt
 }
 
 void set_framebuffer_console_pixel_depth(int screen, int bytes_per_pixel) {
-        const char *fbset_rgb_str = get_rgb_str(bytes_per_pixel);
+	const char *fbset_rgb_str = get_rgb_str(bytes_per_pixel);
 	char *fbset_str;
-        asprintf(&fbset_str, "%s --all -fb %s%d -depth %d -rgba %s", fbset_path, fb_base, screen, bytes_per_pixel*8, fbset_rgb_str);
-        printf("Setting console framebuffer pixel depth to %d bpp.\n", bytes_per_pixel * 8);
-        system(fbset_str);
+	asprintf(&fbset_str, "%s --all -fb %s%d -depth %d -rgba %s", fbset_path, fb_base, screen, bytes_per_pixel*8, fbset_rgb_str);
+	printf("Setting console framebuffer pixel depth to %d bpp.\n", bytes_per_pixel * 8);
+	system(fbset_str);
 	free(fbset_str);
 }
 
@@ -517,7 +589,34 @@ static void set_pixel_depth(int screen, int bytes_per_pixel) {
 	}
 }
 #endif
+static void set_pixel_format(int screen, int format, int seq, int  br_swap)
+{
 
+	int ret;
+	int layer_handle = get_layer_handle(screen);
+	__disp_layer_info_t layer_info;
+	unsigned int args[4];
+	args[0] = screen;
+	args[1] = layer_handle;
+	args[2] = &layer_info;
+	ret = ioctl(fd_disp, DISP_CMD_LAYER_GET_PARA, args);
+	if (ret < 0) {
+		fprintf(stderr, "Error: ioctl(DISP_CMD_LAYER_GET_PARA) failed: %s\n", strerror(- ret));
+		exit(ret);
+	}
+	printf("format = %d, seq = %d, br_swap = %d.\n", layer_info.fb.format, layer_info.fb.seq, layer_info.fb.br_swap);
+	if(format!=-1)layer_info.fb.format=format;
+	if(seq!=-1)layer_info.fb.seq=seq;
+	if(br_swap!=-1)layer_info.fb.br_swap=br_swap;
+	args[0] = screen;
+	args[1] = layer_handle;
+	args[2] = &layer_info;
+	ret = ioctl(fd_disp, DISP_CMD_LAYER_SET_PARA, args);
+	if (ret < 0) {
+		fprintf(stderr, "Error: ioctl(DISP_CMD_LAYER_SET_PARA) failed: %s\n", strerror(- ret));
+		exit(ret);
+	}
+}
 static void set_hdmi_mode(int screen, int mode, int previous_bytes_per_pixel, int bytes_per_pixel,
 int previous_width, int previous_height, int disable_scaler_when_not_used) {
 	int ret;
@@ -588,6 +687,7 @@ int main(int argc, char *argv[]) {
 	int screen = 0;
 	int sc_source_width, sc_source_height, sc_width, sc_height; //Scaler args
 	int layer_arg_value; //Variable to specqify brightness, hue or saturation value
+	int format=-1,seq=-1,br_swap=-1;
 	__disp_cmd_t layer_arg;
 	int argi = 1;
 	if (argc == 1) {
@@ -863,6 +963,28 @@ int main(int argc, char *argv[]) {
 		layer_arg=DISP_CMD_LAYER_SET_HUE;
 		layer_arg_value=atoi(argv[argi]);
 	}
+	else
+	if (strcasecmp(argv[argi], "setpixelformat") == 0) {
+		if (argi + 1 >= argc) {
+			usage(argc, argv);
+			pixfmt_usage();
+			return 0;
+		}
+		command = COMMAND_SET_PIXEL_FORMAT;
+		int i=0;
+		argi++;
+		do
+		{
+			i++;
+			switch(*(argv[argi]+i-1))
+			{
+				case 'f':format=atoi(argv[argi]+i);break;
+				case 's':seq=atoi(argv[argi]+i);break;
+				case 'w':br_swap=atoi(argv[argi]+i);break;
+			}
+		}
+		while(*(argv[argi]+i));
+	}
 	else {
 		fprintf(stderr, "Unknown command %s. Run a10disp without arguments for usage information.\n", argv[argi]);
 		return 1;
@@ -986,7 +1108,9 @@ int main(int argc, char *argv[]) {
 						bytes_per_pixel = 2;
 					printf("	Framebuffer dimensions are %d x %d (%.2f MB).\n", fb_info.size.width, fb_info.size.height,
 						(float)(bytes_per_pixel * fb_info.size.width * fb_info.size.height) / (1024 * 1024));
-					printf("	Framebuffer pixel format = 0x%02X (%dbpp).\n", fb_info.format, bytes_per_pixel * 8);
+					printf("	Framebuffer pixel format = 0x%02X (%d), %s, %dbpp.\n", fb_info.format, fb_info.format, format_str[fb_info.format], bytes_per_pixel * 8);
+					printf("	Framebuffer pixel_sequence = 0x%02X (%d), %s.\n", fb_info.seq, fb_info.seq, seq_str[fb_info.seq]);
+					printf("	Framebuffer BR color swapping is %s.\n",fb_info.br_swap?"enabled":"disabled");
 				}
 				args[0] = screen;
 				args[1] = layer_handle;
@@ -1275,6 +1399,8 @@ int main(int argc, char *argv[]) {
 		ioctl(fd_disp, layer_arg, args);
 		ioctl(fd_disp, DISP_CMD_LAYER_ENHANCE_ON, args);
 	}
+	else
+	if(command == COMMAND_SET_PIXEL_FORMAT) set_pixel_format(screen, format, seq, br_swap);
 
 	if (command == COMMAND_SWITCH_TO_HDMI || command == COMMAND_SWITCH_TO_HDMI_FORCE ||
 	command == COMMAND_ENABLE_HDMI || command == COMMAND_ENABLE_HDMI_FORCE ||
