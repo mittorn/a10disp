@@ -691,9 +691,12 @@ int main(int argc, char *argv[]) {
 		int width;
 		int height;
 	} scaler;
-	//int sc_source_width, sc_source_height, sc_width, sc_height; //Scaler args
 	int layer_arg_value; //Variable to specqify brightness, hue or saturation value
-	int format=-1,seq=-1,br_swap=-1;
+	struct {
+		int format;
+		int seq;
+		int br_swap;
+	} pixfmt;
 	__disp_cmd_t layer_arg;
 	int argi = 1;
 	if (argc == 1) {
@@ -976,6 +979,7 @@ int main(int argc, char *argv[]) {
 			pixfmt_usage();
 			return 0;
 		}
+		pixfmt.format=pixfmt.seq=pixfmt.br_swap=-1;
 		command = COMMAND_SET_PIXEL_FORMAT;
 		int i=0;
 		argi++;
@@ -984,9 +988,9 @@ int main(int argc, char *argv[]) {
 			i++;
 			switch(*(argv[argi]+i-1))
 			{
-				case 'f':format=atoi(argv[argi]+i);break;
-				case 's':seq=atoi(argv[argi]+i);break;
-				case 'w':br_swap=atoi(argv[argi]+i);break;
+				case 'f':pixfmt.format=atoi(argv[argi]+i);break;
+				case 's':pixfmt.seq=atoi(argv[argi]+i);break;
+				case 'w':pixfmt.br_swap=atoi(argv[argi]+i);break;
 			}
 		}
 		while(*(argv[argi]+i));
@@ -1406,7 +1410,7 @@ int main(int argc, char *argv[]) {
 		ioctl(fd_disp, DISP_CMD_LAYER_ENHANCE_ON, args);
 	}
 	else
-	if(command == COMMAND_SET_PIXEL_FORMAT) set_pixel_format(screen, format, seq, br_swap);
+	if(command == COMMAND_SET_PIXEL_FORMAT) set_pixel_format(screen, pixfmt.format, pixfmt.seq, pixfmt.br_swap);
 
 	if (command == COMMAND_SWITCH_TO_HDMI || command == COMMAND_SWITCH_TO_HDMI_FORCE ||
 	command == COMMAND_ENABLE_HDMI || command == COMMAND_ENABLE_HDMI_FORCE ||
