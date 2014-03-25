@@ -685,7 +685,13 @@ int main(int argc, char *argv[]) {
 	int previous_bytes_per_pixel = 2;
 	int previous_width = 800, previous_height = 480;
 	int screen = 0;
-	int sc_source_width, sc_source_height, sc_width, sc_height; //Scaler args
+	struct {
+		int source_width;
+		int source_height;
+		int width;
+		int height;
+	} scaler;
+	//int sc_source_width, sc_source_height, sc_width, sc_height; //Scaler args
 	int layer_arg_value; //Variable to specqify brightness, hue or saturation value
 	int format=-1,seq=-1,br_swap=-1;
 	__disp_cmd_t layer_arg;
@@ -911,10 +917,10 @@ int main(int argc, char *argv[]) {
 				return  1;
 			}
 			command = COMMAND_RESCALE;
-			sc_source_width=atoi(argv[argi+1]);
-			sc_source_height=atoi(argv[argi+2]);
-			sc_width=atoi(argv[argi+3]);
-			sc_height=atoi(argv[argi+4]);
+			scaler.source_width=atoi(argv[argi+1]);
+			scaler.source_height=atoi(argv[argi+2]);
+			scaler.width=atoi(argv[argi+3]);
+			scaler.height=atoi(argv[argi+4]);
 	}
 	else
 		if(strcasecmp(argv[argi], "disablescaler") == 0)
@@ -1109,7 +1115,7 @@ int main(int argc, char *argv[]) {
 					printf("	Framebuffer dimensions are %d x %d (%.2f MB).\n", fb_info.size.width, fb_info.size.height,
 						(float)(bytes_per_pixel * fb_info.size.width * fb_info.size.height) / (1024 * 1024));
 					printf("	Framebuffer pixel format = 0x%02X (%d), %s, %dbpp.\n", fb_info.format, fb_info.format, format_str[fb_info.format], bytes_per_pixel * 8);
-					printf("	Framebuffer pixel_sequence = 0x%02X (%d), %s.\n", fb_info.seq, fb_info.seq, seq_str[fb_info.seq]);
+					printf("	Framebuffer pixel sequence = 0x%02X (%d), %s.\n", fb_info.seq, fb_info.seq, seq_str[fb_info.seq]);
 					printf("	Framebuffer BR color swapping is %s.\n",fb_info.br_swap?"enabled":"disabled");
 				}
 				args[0] = screen;
@@ -1265,7 +1271,7 @@ int main(int argc, char *argv[]) {
 	}
 	else
 	if (command == COMMAND_RESCALE)
-		enable_scaler_for_size(screen, sc_source_width, sc_source_height, sc_width, sc_height);
+		enable_scaler_for_size(screen, scaler.source_width, scaler.source_height, scaler.width, scaler.height);
 	else
 	if (command == COMMAND_DISABLE_SCALER)
 		disable_scaler(screen);
