@@ -68,12 +68,14 @@ Change DISP_TV_MODE_NUM in include/video/sunxi_disp_ioctl.h, add mode to this fi
 #define COMMAND_DISPLAY_OFF				6
 #define COMMAND_LCD_ON					7
 #define COMMAND_INFO					8
-#define COMMAND_RESCALE					9
+#define COMMAND_ENABLE_SCALER			9
 #define COMMAND_DISABLE_SCALER 			10
 #define COMMAND_ENABLE_HDMI 			11
 #define COMMAND_ENABLE_HDMI_FORCE 		12
-#define COMMAND_SET_LAYER_ARG 			13
+#define COMMAND_SET_LAYER_ARGS 			13
 #define COMMAND_SET_PIXEL_FORMAT		14
+#define COMMAND_PRINT_FB_INFO			15
+#define COMMAND_READ_FB_INFO			16
 
 static int fd_disp;
 static int fd_fb[2];
@@ -83,7 +85,7 @@ static char * fbset_path = "fbset";
 static char skip_fb_check = 0;
 static char skip_version_check = 0;
 static int use_scaler_for_large_32bpp_modes = DEFAULT_USE_SCALER_FOR_LARGE_32BPP_MODES;
-
+int force_layer_handle=-1;
 static const char *mode_str[MODE_COUNT] = {
 	"480i",
 	"576i",
@@ -206,9 +208,11 @@ static void usage(int argc, char *argv[]) {
 		"	Set fbset command path.\n"
 		"--skip-size-check\n"
 		"	Do not check framebuffer size.\n"
-		"--no-version-check\n"
+		"--skip-version-check\n"
 		"	Skip the version check for the kernel fb driver, allowing running of the\n"
 		"	program on old kernels and Android.\n"
+		"--layer-handle <number>\n"
+		"	Use layer with given handle instead of framebuffer. It's possible to control layers, allocated by other applications. You can get it from dmesg output.\n"
 		"Commands:\n"
 		"info\n"
 		"	Show information about the current mode on screens 0 and 1.\n"
@@ -232,23 +236,38 @@ static void usage(int argc, char *argv[]) {
 		"	Enable LCD display. Only valid when screen output is disabled on the given screen.\n"
 		"enablehdmi mode_number [pixel_depth]\n"
 		"	Enable hdmi output with given mode.\n"
-		"rescale source_width source_height width height\n"
+		"enablescaler source_rect[n] screen_rect"
 		"	Enable hardware scaler layer. Can be used with overscaned HDMI or non-square pixel lcd matrix.\n"
 		"	May cause VDPAU problems if the resolution dimensions are not divisible by 16.\n"
+		"	Rect is [x<x_pos>][y<y_pos>][w<width>][h<height>]\n"
+		"	Add 'n' to source rect to skip enabling scaler, then a10disp only changes rects.\n"
+		"	Examples:\n"
+		"	Crop screen to (10,10,800,480), move it to (0,5) and rescale to 800x450:\n"
+		"		enablescaler x10y10w800h480 x0y5w800h450\n"
+		"	Move screen to (25,25) without enabling the scaler:\n"
+		"		enablescaler x0y0n x25y25\n"
+		"	enable scaler without changing the rectangle:\n"
+		"		enablescaler 0 0\n" 
+		"rescale source_width source_height width height\n"
+		"	Alias for enablescaler w<source_width>h<source_height> w<width>h<height>.\n"
 		"disablescaler\n"
 		"	Disable hardware scaler layer.\n"
-		"layerbrightness <value>\n"
-		"	Set layer brightness. Need reenable scaler to update value.\n"
-		"layercontrast <value>\n"
-		"	Set layer contrast.\n"
-		"layersaturation <value>\n"
-		"	Set layer saturetion.\n"
-		"layerhue <value>\n"
-		"	Set layer hue.\n"
+		"layerargs [b<brightness>][c<contrast>][s<saturation>][h<hue>][m<smooth>]\n"
+		"	Set layer parameters\n"
 		"setpixelformat [f<format>]s<seq>][w<brswap>]\n"
 		"	Set pixel format using DISP. Can work with lcd and hdmi. Useful when hdmi monitor uses wrong format.\n"
 		"	Example: f10s0w0 is ARGB8888 (f10), ARGB sequence (s0) without blue/red swapping (w0).\n"
-		"	Use setpixelformat without arguments for formats list",
+		"	Use setpixelformat without arguments for formats list.\n"
+		"printfbinfo\n"
+		"	Print special framebuffer information.\n"
+		"readfbinfo\n"
+		"	Read and set framebuffer information, given by printfbinfo from stdin. Can be used to enable screen clone mode or xinerama.\n"
+		"	To clone screen 0 to 1:\n"
+		"		a10disp printfbinfo | a10disp --screen 1 readfbinfo\n"
+		"	To save fbinfo to file:\n"
+		"		a10disp printfbinfo > screen0.txt\n"
+		"	To read from file:\n"
+		"		a10disp readfbinfo < screen0.txt\n",
 		argv[0]);
 	printf("\nHDMI/TV mode numbers:\n");
 	for (i = 0; i < MODE_COUNT; i++)
@@ -305,6 +324,7 @@ static char *layer_mode_str(__disp_layer_work_mode_t mode) {
 
 int get_layer_handle(int screen)
 {
+	if(force_layer_handle!=-1)return force_layer_handle;
 	int ret=-1;
 	unsigned int args[4];
 	if (fd_fb[screen] >= 0)
@@ -328,7 +348,7 @@ static void set_framebuffer_console_size_to_screen_size(int screen) {
 	int tmp;
 	int ret;
 	int width, height;
-	char s[80];
+	char * fbset_str;
 	tmp = screen;
 	ret = ioctl(fd_disp, DISP_CMD_SCN_GET_WIDTH, &tmp);
 	if (ret < 0) {
@@ -349,9 +369,11 @@ static void set_framebuffer_console_size_to_screen_size(int screen) {
 		printf("Error: ioctl to get screen dimensions returned invalid value.\n");
 		exit(1);
 	}
-	sprintf(s, "%s --all -fb %s%d -xres %d -yres %d", fbset_path, fb_base, screen, width, height);
+	asprintf(&fbset_str, "%s --all -fb %s%d -xres %d -yres %d", fbset_path, fb_base, screen, width, height);
 	printf("Setting console framebuffer resolution to %d x %d.\n", width, height);
-	system(s);
+	ret=system(fbset_str);
+	if(ret)
+		printf("Warning:fbset exited with %d.\n", ret);
 }
 
 static const char* get_rgb_str(int bytes_per_pixel) {
@@ -394,18 +416,22 @@ static void set_framebuffer_console_size_to_screen_size_and_set_pixel_depth(int 
 	asprintf(&fbset_str, "%s --all -fb %s%d -xres %d -yres %d -depth %d -rgba %s",
 		fbset_path, fb_base, screen, width, height, bytes_per_pixel * 8, get_rgb_str(bytes_per_pixel));
 	printf("Setting console framebuffer resolution to %d x %d and pixel depth to %dbpp.\n", width, height, bytes_per_pixel * 8);
-	system(fbset_str);
+	ret=system(fbset_str);
+	if(ret)
+		printf("Warning: fbset exited with %d.\n", ret);
 	free(fbset_str);
 }
 
 static void set_framebuffer_console_size_and_depth(int screen, int mode, int bytes_per_pixel) {
 	const char *fbset_rgb_str = get_rgb_str(bytes_per_pixel);
 	char *fbset_str;
-	asprintf(&fbset_str, "%s --all -fb %s%d -xres %d -yres %d -depth 32 -rgba 8,8,8,8",
-		fbset_path, fb_base, screen, mode_width[mode], mode_height[mode]);
+	asprintf(&fbset_str, "%s --all -fb %s%d -xres %d -yres %d -depth %d -rgba %s",
+		fbset_path, fb_base, screen, mode_width[mode], mode_height[mode], bytes_per_pixel *8 , fbset_rgb_str);
 	printf("Setting console framebuffer resolution to %d x %d and pixel depth to %dbpp.\n", mode_width[mode],
 		mode_height[mode], bytes_per_pixel * 8);
-	system(fbset_str);
+	int ret=system(fbset_str);
+	if(ret)
+		printf("Warning: fbset exited with %d.\n", ret);
 	free(fbset_str);
 }
 
@@ -414,7 +440,9 @@ void set_framebuffer_console_pixel_depth(int screen, int bytes_per_pixel) {
 	char *fbset_str;
 	asprintf(&fbset_str, "%s --all -fb %s%d -depth %d -rgba %s", fbset_path, fb_base, screen, bytes_per_pixel*8, fbset_rgb_str);
 	printf("Setting console framebuffer pixel depth to %d bpp.\n", bytes_per_pixel * 8);
-	system(fbset_str);
+	int ret=system(fbset_str);
+	if(ret)
+		printf("Warning: fbset exited with %d.\n", ret);
 	free(fbset_str);
 }
 
@@ -470,7 +498,7 @@ static void enable_scaler_for_mode(int screen, int mode) {
 		exit(ret);
 	}
 }
-static void enable_scaler_for_size(int screen, int sw,int sh,int w,int h) {
+static void enable_scaler_with_rect(int screen, __disp_rect_t src, __disp_rect_t scn, int flags) {
 	int ret;
 	int layer_handle = get_layer_handle(screen);
 	__disp_layer_info_t layer_info;
@@ -484,11 +512,16 @@ static void enable_scaler_for_size(int screen, int sw,int sh,int w,int h) {
 		fprintf(stderr, "Error: ioctl(DISP_CMD_LAYER_GET_PARA) failed: %s\n", strerror(- ret));
 		exit(ret);
 	}
-	layer_info.mode = DISP_LAYER_WORK_MODE_SCALER;
-	layer_info.src_win.width = sw;
-	layer_info.src_win.height = sh;
-	layer_info.scn_win.width = w;
-	layer_info.scn_win.height = h;
+	if(!(flags&(1<<8)))layer_info.mode = DISP_LAYER_WORK_MODE_SCALER;
+	if(flags&(1<<0))layer_info.src_win.x=src.x;
+	if(flags&(1<<1))layer_info.src_win.y=src.y;
+	if(flags&(1<<2))layer_info.src_win.width = src.width;
+	if(flags&(1<<3))layer_info.src_win.height = src.height;
+	if(flags&(1<<4))layer_info.scn_win.x=scn.x;
+	if(flags&(1<<5))layer_info.scn_win.y=scn.y;
+	if(flags&(1<<6))layer_info.scn_win.width = scn.width;
+	if(flags&(1<<7))layer_info.scn_win.height = scn.height;
+	//printf("%X %d %d %d %d %d %d %d %d\n", flags, src.x, src.y, src.width, src.height, scn.x, scn.y, scn.width, scn.height);
 	args[0] = screen;
 	args[1] = layer_handle;
 	args[2] = &layer_info;
@@ -651,7 +684,7 @@ int previous_width, int previous_height, int disable_scaler_when_not_used) {
 	if (ret < 0) {
 		fprintf(stderr, "Error: ioctl(DISP_CMD_HDMI_SET_MODE) failed: %s\n",
 				strerror(-ret));
-		return ret;
+		exit(ret);
 	}
 
 	if (use_scaler_for_large_32bpp_modes &&
@@ -686,10 +719,9 @@ int main(int argc, char *argv[]) {
 	int previous_width = 800, previous_height = 480;
 	int screen = 0;
 	struct {
-		int source_width;
-		int source_height;
-		int width;
-		int height;
+		__disp_rect_t src;
+		__disp_rect_t scn;
+		int flags;
 	} scaler;
 	int layer_arg_value; //Variable to specqify brightness, hue or saturation value
 	struct {
@@ -697,7 +729,14 @@ int main(int argc, char *argv[]) {
 		int seq;
 		int br_swap;
 	} pixfmt;
-	__disp_cmd_t layer_arg;
+	struct {
+		int brightness;
+		int contrast;
+		int saturation;
+		int hue;
+		int smooth;
+		int flags;
+	} layerargs;
 	int argi = 1;
 	if (argc == 1) {
 		usage(argc, argv);
@@ -746,6 +785,12 @@ int main(int argc, char *argv[]) {
 		}
 		if (strcasecmp(argv[argi], "--skip-version-check") == 0) {
 			skip_version_check = 1;
+			argi++;
+			continue;
+		}
+		if (strcasecmp(argv[argi], "--layer-handle") == 0) {
+			argi++;
+			force_layer_handle=atoi(argv[argi]);
 			argi++;
 			continue;
 		}
@@ -919,58 +964,77 @@ int main(int argc, char *argv[]) {
 				usage(argc,argv);
 				return  1;
 			}
-			command = COMMAND_RESCALE;
-			scaler.source_width=atoi(argv[argi+1]);
-			scaler.source_height=atoi(argv[argi+2]);
-			scaler.width=atoi(argv[argi+3]);
-			scaler.height=atoi(argv[argi+4]);
+			command = COMMAND_ENABLE_SCALER;
+			scaler.src.width=atoi(argv[argi+1]);
+			scaler.src.height=atoi(argv[argi+2]);
+			scaler.scn.width=atoi(argv[argi+3]);
+			scaler.scn.height=atoi(argv[argi+4]);
+			scaler.flags=0x33; //00110011
+	}
+	else
+	if (strcasecmp(argv[argi], "enablescaler") == 0) {
+		if (argi + 2 >= argc) {
+			usage(argc, argv);
+			return 1;
+		}
+		command = COMMAND_ENABLE_SCALER;
+		scaler.flags=0;
+		int i=0;
+		argi++;
+		do
+		{
+			i++;
+			switch(*(argv[argi]+i-1))
+			{
+				case 'x':scaler.flags|=1<<0,scaler.src.x=atoi(argv[argi]+i);break;
+				case 'y':scaler.flags|=1<<1,scaler.src.y=atoi(argv[argi]+i);break;
+				case 'w':scaler.flags|=1<<2,scaler.src.width=atoi(argv[argi]+i);break;
+				case 'h':scaler.flags|=1<<3,scaler.src.height=atoi(argv[argi]+i);break;
+				case 'n':scaler.flags|=1<<8;break;
+			}
+		}
+		while(*(argv[argi]+i));
+		argi++;
+		i=0;
+		do
+		{
+			i++;
+			switch(*(argv[argi]+i-1))
+			{
+				case 'x':scaler.flags|=1<<4,scaler.scn.x=atoi(argv[argi]+i);break;
+				case 'y':scaler.flags|=1<<5,scaler.scn.y=atoi(argv[argi]+i);break;
+				case 'w':scaler.flags|=1<<6,scaler.scn.width=atoi(argv[argi]+i);break;
+				case 'h':scaler.flags|=1<<7,scaler.scn.height=atoi(argv[argi]+i);break;
+			}
+		}
+		while(*(argv[argi]+i));
 	}
 	else
 		if(strcasecmp(argv[argi], "disablescaler") == 0)
 			command=COMMAND_DISABLE_SCALER;
 	else
-	if (strcasecmp(argv[argi], "layerbrightness") == 0) {
+	if (strcasecmp(argv[argi], "layerargs") == 0) {
 		if (argi + 1 >= argc) {
 			usage(argc, argv);
 			return 1;
 		}
 		argi++;
-		command = COMMAND_SET_LAYER_ARG;
-		layer_arg=DISP_CMD_LAYER_SET_BRIGHT;
-		layer_arg_value=atoi(argv[argi]);
-	}
-	else
-	if (strcasecmp(argv[argi], "layercontrast") == 0) {
-		if (argi + 1 >= argc) {
-			usage(argc, argv);
-			return 1;
+		layerargs.flags=0;
+		command = COMMAND_SET_LAYER_ARGS;
+		i=0;
+		do
+		{
+			i++;
+			switch(*(argv[argi]+i-1))
+			{
+				case 'b':layerargs.flags|=1<<0,layerargs.brightness=atoi(argv[argi]+i);break;
+				case 'c':layerargs.flags|=1<<1,layerargs.contrast=atoi(argv[argi]+i);break;
+				case 's':layerargs.flags|=1<<2,layerargs.saturation=atoi(argv[argi]+i);break;
+				case 'h':layerargs.flags|=1<<3,layerargs.hue=atoi(argv[argi]+i);break;
+				case 'm':layerargs.flags|=1<<4,layerargs.smooth=atoi(argv[argi]+i);break;
+			}
 		}
-		argi++;
-		command = COMMAND_SET_LAYER_ARG;
-		layer_arg=DISP_CMD_LAYER_SET_CONTRAST;
-		layer_arg_value=atoi(argv[argi]);
-	}
-	else
-	if (strcasecmp(argv[argi], "layersaturation") == 0) {
-		if (argi + 1 >= argc) {
-			usage(argc, argv);
-			return 1;
-		}
-		argi++;
-		command = COMMAND_SET_LAYER_ARG;
-		layer_arg=DISP_CMD_LAYER_SET_SATURATION;
-		layer_arg_value=atoi(argv[argi]);
-	}
-	else
-	if (strcasecmp(argv[argi], "layerhue") == 0) {
-		if (argi + 1 >= argc) {
-			usage(argc, argv);
-			return 1;
-		}
-		argi++;
-		command = COMMAND_SET_LAYER_ARG;
-		layer_arg=DISP_CMD_LAYER_SET_HUE;
-		layer_arg_value=atoi(argv[argi]);
+		while(*(argv[argi]+i));
 	}
 	else
 	if (strcasecmp(argv[argi], "setpixelformat") == 0) {
@@ -994,6 +1058,14 @@ int main(int argc, char *argv[]) {
 			}
 		}
 		while(*(argv[argi]+i));
+	}
+	else
+	if (strcasecmp(argv[argi], "printfbinfo") == 0) {
+		command = COMMAND_PRINT_FB_INFO;
+	}
+	else
+	if (strcasecmp(argv[argi], "readfbinfo") == 0) {
+		command = COMMAND_READ_FB_INFO;
 	}
 	else {
 		fprintf(stderr, "Unknown command %s. Run a10disp without arguments for usage information.\n", argv[argi]);
@@ -1022,7 +1094,7 @@ int main(int argc, char *argv[]) {
 	} else {
 		ver_major = ret >> 16;
 		ver_minor = ret & 0xFFFF;
-		printf("sunxi disp kernel module version is %d.%d\n",
+		fprintf(stderr, "sunxi disp kernel module version is %d.%d\n",
 		       ver_major, ver_minor);
 	}
 	if (ver_major < 1) {
@@ -1120,7 +1192,8 @@ int main(int argc, char *argv[]) {
 						(float)(bytes_per_pixel * fb_info.size.width * fb_info.size.height) / (1024 * 1024));
 					printf("	Framebuffer pixel format = 0x%02X (%d), %s, %dbpp.\n", fb_info.format, fb_info.format, format_str[fb_info.format], bytes_per_pixel * 8);
 					printf("	Framebuffer pixel sequence = 0x%02X (%d), %s.\n", fb_info.seq, fb_info.seq, seq_str[fb_info.seq]);
-					printf("	Framebuffer BR color swapping is %s.\n",fb_info.br_swap?"enabled":"disabled");
+					printf("	Framebuffer pixel BR color swapping is %s.\n",fb_info.br_swap?"enabled":"disabled");
+					printf("	Framebuffer address = 0x%X.\n",fb_info.addr[0]);
 				}
 				args[0] = screen;
 				args[1] = layer_handle;
@@ -1274,8 +1347,8 @@ int main(int argc, char *argv[]) {
 			set_framebuffer_console_size_to_screen_size(screen);
 	}
 	else
-	if (command == COMMAND_RESCALE)
-		enable_scaler_for_size(screen, scaler.source_width, scaler.source_height, scaler.width, scaler.height);
+	if (command == COMMAND_ENABLE_SCALER)
+		enable_scaler_with_rect(screen, scaler.src, scaler.scn, scaler.flags);
 	else
 	if (command == COMMAND_DISABLE_SCALER)
 		disable_scaler(screen);
@@ -1399,19 +1472,62 @@ int main(int argc, char *argv[]) {
 			set_framebuffer_console_size_to_screen_size(screen);
 	}
 	else
-	if(command == COMMAND_SET_LAYER_ARG)
+	if(command == COMMAND_SET_LAYER_ARGS)
 	{
+		int layer_handle=get_layer_handle(screen);
 		ioctl(fd_disp, DISP_CMD_LAYER_ENHANCE_OFF, args);
 		args[0]=screen;
-		args[1]=get_layer_handle(screen);
-		args[2]=layer_arg_value;
-		args[4]=0;
-		ioctl(fd_disp, layer_arg, args);
+		args[1]=layer_handle;               
+		args[3]=0;
+		if(layerargs.flags&(1<<0)) {
+			args[2]=layerargs.brightness;
+			ioctl(fd_disp, DISP_CMD_LAYER_SET_BRIGHT, args);
+		}
+		if(layerargs.flags&(1<<1)) {
+			args[2]=layerargs.contrast;
+			ioctl(fd_disp, DISP_CMD_LAYER_SET_CONTRAST, args);
+		}
+		if(layerargs.flags&(1<<2)) {
+			args[2]=layerargs.saturation;
+			ioctl(fd_disp, DISP_CMD_LAYER_SET_SATURATION, args);
+		}
+		if(layerargs.flags&(1<<3)) {
+			args[2]=layerargs.hue;
+			ioctl(fd_disp, DISP_CMD_LAYER_SET_HUE, args);
+		}
+		if(layerargs.flags&(1<<4)) {
+			args[2]=layerargs.smooth;
+			ioctl(fd_disp, DISP_CMD_LAYER_SET_SMOOTH, args);
+		}
 		ioctl(fd_disp, DISP_CMD_LAYER_ENHANCE_ON, args);
 	}
 	else
 	if(command == COMMAND_SET_PIXEL_FORMAT) set_pixel_format(screen, pixfmt.format, pixfmt.seq, pixfmt.br_swap);
-
+	else
+	if(command == COMMAND_PRINT_FB_INFO) {
+		__disp_fb_t fb_info;
+		args[0] = screen;
+		args[1] = get_layer_handle(screen);
+		args[2] = &fb_info;
+		if(ioctl(fd_disp, DISP_CMD_LAYER_GET_FB, args)>=0) printf("%d %d %d %d %d %d %d %d %d %d\n", 
+			fb_info.addr[0], fb_info.addr[1], fb_info.addr[2], fb_info.size.width, 
+			fb_info.size.height, fb_info.format, fb_info.seq, fb_info.mode, fb_info.br_swap, 
+			fb_info.cs_mode);
+		
+	}
+	else
+	if(command == COMMAND_READ_FB_INFO) {
+		__disp_fb_t fb_info;
+		scanf("%d %d %d %d %d %d %d %d %d %d", 
+			&fb_info.addr[0], &fb_info.addr[1], &fb_info.addr[2], &fb_info.size.width, 
+			&fb_info.size.height, &fb_info.format, &fb_info.seq, &fb_info.mode, &fb_info.br_swap, 
+			&fb_info.cs_mode);
+		args[0] = screen;
+		args[1] = get_layer_handle(screen);
+		args[2] = &fb_info;
+		ioctl(fd_disp, DISP_CMD_LAYER_SET_FB, args);
+		
+	}
 	if (command == COMMAND_SWITCH_TO_HDMI || command == COMMAND_SWITCH_TO_HDMI_FORCE ||
 	command == COMMAND_ENABLE_HDMI || command == COMMAND_ENABLE_HDMI_FORCE ||
 	command == COMMAND_CHANGE_HDMI_MODE || command == COMMAND_CHANGE_HDMI_MODE_FORCE ||
