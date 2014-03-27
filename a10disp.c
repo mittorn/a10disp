@@ -969,7 +969,7 @@ int main(int argc, char *argv[]) {
 			scaler.src.height=atoi(argv[argi+2]);
 			scaler.scn.width=atoi(argv[argi+3]);
 			scaler.scn.height=atoi(argv[argi+4]);
-			scaler.flags=0x33; //00110011
+			scaler.flags=0xCC; //11001100
 	}
 	else
 	if (strcasecmp(argv[argi], "enablescaler") == 0) {
