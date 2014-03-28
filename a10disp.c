@@ -188,7 +188,7 @@ static int mode_height[MODE_COUNT] = { 480, 576, 480, 576, 720, 720, 1080, 1080,
 
 static void usage(int argc, char *argv[]) {
 	int i;
-	printf("a10disp v0.6.1\n");
+	printf("a10disp v0.7\n");
 	printf("Usage: %s <options> <command>\n"
 		"Options:\n"
 		"--screen <number>\n"

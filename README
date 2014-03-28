@@ -1,4 +1,4 @@
-a10disp v0.6.1
+a10disp v0.7
 
 a10disp is a utility to change the output mode of screen 0 or 1 for A1x and A20
 devices running Linux, especially tablets, but should also work on other boards.
@@ -9,6 +9,10 @@ It has support for:
 	  depth.
 	- Switching the output from HDMI to LCD.
 	- Changing the HDMI mode and pixel depth.
+	- Changing the pixel format.
+	- Swithing screen clone and xinerama modes.
+	- Changing layer brightness, hue, contrast, saturation and scaler
+	  smooth level.
 
 Pixel depths can be 32 (RGBA8888) or 16 (RGB565). VGA or TV output is currently
 not supported.
@@ -86,6 +90,10 @@ You can specify path to fbset utility by --fbset-command option. In Android,
 fbset from Busybox will not work.
 
 Changes:
+v0.7	- Add setpixelformat, layerargs, enablescaler, printfbinfo, readfbinfo
+	  commands.
+	  Add --layer-handle option to operate with other layers.
+	  More detailed info output.
 v0.6.1	- Add options to specify fbset and framebudfer pathes and to skip 
 	  framebuffer size check. Can now work on Android which has the
           fb node at /dev/grapics/ and on devices without framebuffer at all.
